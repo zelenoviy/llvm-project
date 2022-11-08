@@ -127,6 +127,27 @@ private:
 };
 } // namespace
 
+static bool canWidenLoad(LoadInst *Load, const TargetTransformInfo &TTI) {
+  // Do not widen load if atomic/volatile or under asan/hwasan/memtag/tsan.
+  // The widened load may load data from dirty regions or create data races
+  // non-existent in the source.
+  if (!Load || !Load->isSimple() || !Load->hasOneUse() ||
+      Load->getFunction()->hasFnAttribute(Attribute::SanitizeMemTag) ||
+      mustSuppressSpeculation(*Load))
+    return false;
+
+  // We are potentially transforming byte-sized (8-bit) memory accesses, so make
+  // sure we have all of our type-based constraints in place for this target.
+  Type *ScalarTy = Load->getType()->getScalarType();
+  uint64_t ScalarSize = ScalarTy->getPrimitiveSizeInBits();
+  unsigned MinVectorSize = TTI.getMinVectorRegisterBitWidth();
+  if (!ScalarSize || !MinVectorSize || MinVectorSize % ScalarSize != 0 ||
+      ScalarSize % 8 != 0)
+    return false;
+
+  return true;
+}
+
 bool VectorCombine::vectorizeLoadInsert(Instruction &I) {
   // Match insert into fixed vector of scalar value.
   // TODO: Handle non-zero insert index.
@@ -142,35 +163,22 @@ bool VectorCombine::vectorizeLoadInsert(Instruction &I) {
   if (!HasExtract)
     X = Scalar;
 
-  // Match source value as load of scalar or vector.
-  // Do not vectorize scalar load (widening) if atomic/volatile or under
-  // asan/hwasan/memtag/tsan. The widened load may load data from dirty regions
-  // or create data races non-existent in the source.
   auto *Load = dyn_cast<LoadInst>(X);
-  if (!Load || !Load->isSimple() || !Load->hasOneUse() ||
-      Load->getFunction()->hasFnAttribute(Attribute::SanitizeMemTag) ||
-      mustSuppressSpeculation(*Load))
+  if (!canWidenLoad(Load, TTI))
     return false;
 
-  const DataLayout &DL = I.getModule()->getDataLayout();
-  Value *SrcPtr = Load->getPointerOperand()->stripPointerCasts();
-  assert(isa<PointerType>(SrcPtr->getType()) && "Expected a pointer type");
-
-  unsigned AS = Load->getPointerAddressSpace();
-
-  // We are potentially transforming byte-sized (8-bit) memory accesses, so make
-  // sure we have all of our type-based constraints in place for this target.
   Type *ScalarTy = Scalar->getType();
   uint64_t ScalarSize = ScalarTy->getPrimitiveSizeInBits();
   unsigned MinVectorSize = TTI.getMinVectorRegisterBitWidth();
-  if (!ScalarSize || !MinVectorSize || MinVectorSize % ScalarSize != 0 ||
-      ScalarSize % 8 != 0)
-    return false;
 
   // Check safety of replacing the scalar load with a larger vector load.
   // We use minimal alignment (maximum flexibility) because we only care about
   // the dereferenceable region. When calculating cost and creating a new op,
   // we may use a larger value based on alignment attributes.
+  const DataLayout &DL = I.getModule()->getDataLayout();
+  Value *SrcPtr = Load->getPointerOperand()->stripPointerCasts();
+  assert(isa<PointerType>(SrcPtr->getType()) && "Expected a pointer type");
+
   unsigned MinVecNumElts = MinVectorSize / ScalarSize;
   auto *MinVecTy = VectorType::get(ScalarTy, MinVecNumElts, false);
   unsigned OffsetEltIndex = 0;
@@ -215,6 +223,7 @@ bool VectorCombine::vectorizeLoadInsert(Instruction &I) {
   // Use the greater of the alignment on the load or its source pointer.
   Alignment = std::max(SrcPtr->getPointerAlignment(DL), Alignment);
   Type *LoadTy = Load->getType();
+  unsigned AS = Load->getPointerAddressSpace();
   InstructionCost OldCost =
       TTI.getMemoryOpCost(Instruction::Load, LoadTy, Alignment, AS);
   APInt DemandedElts = APInt::getOneBitSet(MinVecNumElts, 0);
@@ -550,10 +559,15 @@ bool VectorCombine::foldInsExtFNeg(Instruction &I) {
                              m_ConstantInt(Index))))
     return false;
 
+  // Note: This handles the canonical fneg instruction and "fsub -0.0, X".
   Value *SrcVec;
-  if (!match(FNeg, m_FNeg(m_ExtractElt(m_Value(SrcVec), m_SpecificInt(Index)))))
+  Instruction *Extract;
+  if (!match(FNeg, m_FNeg(m_CombineAnd(
+                       m_Instruction(Extract),
+                       m_ExtractElt(m_Value(SrcVec), m_SpecificInt(Index))))))
     return false;
 
+  // TODO: We could handle this with a length-changing shuffle.
   if (SrcVec->getType() != VecTy)
     return false;
 
@@ -577,7 +591,6 @@ bool VectorCombine::foldInsExtFNeg(Instruction &I) {
   // If the extract has one use, it will be eliminated, so count it in the
   // original cost. If it has more than one use, ignore the cost because it will
   // be the same before/after.
-  Instruction *Extract = cast<Instruction>(FNeg->getOperand(0));
   if (Extract->hasOneUse())
     OldCost += TTI.getVectorInstrCost(*Extract, VecTy, Index);
 

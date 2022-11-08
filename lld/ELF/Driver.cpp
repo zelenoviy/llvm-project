@@ -542,7 +542,9 @@ void LinkerDriver::linkerMain(ArrayRef<const char *> argsArr) {
   // Interpret these flags early because error()/warn() depend on them.
   errorHandler().errorLimit = args::getInteger(args, OPT_error_limit, 20);
   errorHandler().fatalWarnings =
-      args.hasFlag(OPT_fatal_warnings, OPT_no_fatal_warnings, false);
+      args.hasFlag(OPT_fatal_warnings, OPT_no_fatal_warnings, false) &&
+      !args.hasArg(OPT_no_warnings);
+  errorHandler().suppressWarnings = args.hasArg(OPT_no_warnings);
   checkZOptions(args);
 
   // Handle -help
@@ -1242,7 +1244,7 @@ static void readConfigs(opt::InputArgList &args) {
   config->trace = args.hasArg(OPT_trace);
   config->undefined = args::getStrings(args, OPT_undefined);
   config->undefinedVersion =
-      args.hasFlag(OPT_undefined_version, OPT_no_undefined_version, true);
+      args.hasFlag(OPT_undefined_version, OPT_no_undefined_version, false);
   config->unique = args.hasArg(OPT_unique);
   config->useAndroidRelrTags = args.hasFlag(
       OPT_use_android_relr_tags, OPT_no_use_android_relr_tags, false);
@@ -2243,9 +2245,16 @@ static std::vector<WrappedSymbol> addWrappedSymbols(opt::InputArgList &args) {
     if (!sym)
       continue;
 
-    Symbol *real = addUnusedUndefined(saver().save("__real_" + name));
     Symbol *wrap =
         addUnusedUndefined(saver().save("__wrap_" + name), sym->binding);
+
+    // If __real_ is referenced, pull in the symbol if it is lazy. Do this after
+    // processing __wrap_ as that may have referenced __real_.
+    StringRef realName = saver().save("__real_" + name);
+    if (symtab.find(realName))
+      addUnusedUndefined(name, sym->binding);
+
+    Symbol *real = addUnusedUndefined(realName);
     v.push_back({sym, real, wrap});
 
     // We want to tell LTO not to inline symbols to be overwritten

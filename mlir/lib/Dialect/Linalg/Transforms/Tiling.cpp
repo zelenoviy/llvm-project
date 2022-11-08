@@ -235,7 +235,11 @@ static FailureOr<ForeachThreadTilingResult> tileToForeachThreadOpImpl(
   auto hasStrideOne = [](Range r) { return !isConstantIntValue(r.stride, 1); };
   if (llvm::any_of(loopRanges, hasStrideOne))
     return op->emitOpError("only stride-1 supported atm");
-  auto dest = op.getDestinationOperands(b);
+
+  // Gather destination tensors.
+  SmallVector<Value> dest;
+  if (failed(tensor::getOrCreateDestinations(b, loc, op, dest)))
+    return op->emitOpError("failed to get destination tensors");
 
   SmallVector<OpFoldResult> nonZeroNumThreads =
       llvm::to_vector(llvm::make_filter_range(numThreads, [](OpFoldResult ofr) {
@@ -320,7 +324,7 @@ static FailureOr<ForeachThreadTilingResult> tileToForeachThreadOpImpl(
   Operation *clonedOp = b.clone(*op.getOperation());
   auto destinationStyleOp = dyn_cast<DestinationStyleOpInterface>(clonedOp);
   if (destinationStyleOp) {
-    for (OpOperand *outOperand : destinationStyleOp.getOutputOperands()) {
+    for (OpOperand *outOperand : destinationStyleOp.getDpsInitOperands()) {
       auto *it = llvm::find(dest, outOperand->get());
       assert(it != dest.end() && "dest operand not found in dest");
       unsigned destNum = std::distance(dest.begin(), it);
@@ -503,7 +507,7 @@ tileLinalgOpImpl(RewriterBase &b, LinalgOp op, ArrayRef<OpFoldResult> tileSizes,
     // Tile the `operandValuesToUse` that either match the `op` operands
     // themselves or the tile loop arguments forwarding them.
     assert(operandValuesToUse.size() ==
-               static_cast<size_t>(op.getNumInputsAndOutputs()) &&
+               static_cast<size_t>(op->getNumOperands()) &&
            "expect the number of operands and inputs and outputs to match");
     SmallVector<Value> valuesToTile = operandValuesToUse;
     SmallVector<OpFoldResult> sizeBounds =
@@ -622,11 +626,13 @@ static LogicalResult tilePadOp(RewriterBase &builder, tensor::PadOp op,
           getValueOrCreateConstantIndexOp(builder, loc, tileSizes[i]));
     }
   }
-  // Generate loop nest: One loop per dimension.
-  SmallVector<Value> destOperand =
-      tilingInterface.getDestinationOperands(builder);
+  SmallVector<Value> destinationTensors;
+  if (failed(tensor::getOrCreateDestinations(builder, loc, tilingInterface,
+                                             destinationTensors)))
+    return failure();
+
   loopNest = mlir::scf::buildLoopNest(
-      builder, loc, lbs, /*ubs=*/dims, steps, ValueRange(destOperand),
+      builder, loc, lbs, /*ubs=*/dims, steps, ValueRange(destinationTensors),
       [&](OpBuilder &b, Location loc, ValueRange localIvs,
           ValueRange iterArgs) -> scf::ValueVector {
         // Compute offsets and sizes of ExtractSliceOp.

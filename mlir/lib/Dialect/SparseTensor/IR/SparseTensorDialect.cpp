@@ -49,7 +49,7 @@ Attribute SparseTensorEncodingAttr::parse(AsmParser &parser, Type type) {
   if (failed(parser.parseGreater()))
     return {};
   // Process the data from the parsed dictionary value into struct-like data.
-  SmallVector<SparseTensorEncodingAttr::DimLevelType, 4> dlt;
+  SmallVector<DimLevelType, 4> dlt;
   AffineMap dimOrd = {};
   AffineMap higherOrd = {};
   unsigned ptr = 0;
@@ -71,23 +71,23 @@ Attribute SparseTensorEncodingAttr::parse(AsmParser &parser, Type type) {
         }
         auto strVal = strAttr.getValue();
         if (strVal == "dense") {
-          dlt.push_back(SparseTensorEncodingAttr::DimLevelType::Dense);
+          dlt.push_back(DimLevelType::Dense);
         } else if (strVal == "compressed") {
-          dlt.push_back(SparseTensorEncodingAttr::DimLevelType::Compressed);
+          dlt.push_back(DimLevelType::Compressed);
         } else if (strVal == "compressed-nu") {
-          dlt.push_back(SparseTensorEncodingAttr::DimLevelType::CompressedNu);
+          dlt.push_back(DimLevelType::CompressedNu);
         } else if (strVal == "compressed-no") {
-          dlt.push_back(SparseTensorEncodingAttr::DimLevelType::CompressedNo);
+          dlt.push_back(DimLevelType::CompressedNo);
         } else if (strVal == "compressed-nu-no") {
-          dlt.push_back(SparseTensorEncodingAttr::DimLevelType::CompressedNuNo);
+          dlt.push_back(DimLevelType::CompressedNuNo);
         } else if (strVal == "singleton") {
-          dlt.push_back(SparseTensorEncodingAttr::DimLevelType::Singleton);
+          dlt.push_back(DimLevelType::Singleton);
         } else if (strVal == "singleton-nu") {
-          dlt.push_back(SparseTensorEncodingAttr::DimLevelType::SingletonNu);
+          dlt.push_back(DimLevelType::SingletonNu);
         } else if (strVal == "singleton-no") {
-          dlt.push_back(SparseTensorEncodingAttr::DimLevelType::SingletonNo);
+          dlt.push_back(DimLevelType::SingletonNo);
         } else if (strVal == "singleton-nu-no") {
-          dlt.push_back(SparseTensorEncodingAttr::DimLevelType::SingletonNuNo);
+          dlt.push_back(DimLevelType::SingletonNuNo);
         } else {
           parser.emitError(parser.getNameLoc(),
                            "unexpected dimension level type: ")
@@ -143,6 +143,10 @@ void SparseTensorEncodingAttr::print(AsmPrinter &printer) const {
   printer << "<{ dimLevelType = [ ";
   for (unsigned i = 0, e = getDimLevelType().size(); i < e; i++) {
     switch (getDimLevelType()[i]) {
+    case DimLevelType::Undef:
+      // TODO: should probably raise an error instead of printing it...
+      printer << "\"undef\"";
+      break;
     case DimLevelType::Dense:
       printer << "\"dense\"";
       break;
@@ -258,96 +262,22 @@ mlir::sparse_tensor::getSparseTensorEncoding(Type type) {
   return nullptr;
 }
 
-bool mlir::sparse_tensor::isDenseDim(
-    SparseTensorEncodingAttr::DimLevelType dltp) {
-  return dltp == SparseTensorEncodingAttr::DimLevelType::Dense;
-}
+bool mlir::sparse_tensor::isUniqueCOOType(RankedTensorType tp) {
+  SparseTensorEncodingAttr enc = getSparseTensorEncoding(tp);
 
-bool mlir::sparse_tensor::isCompressedDim(
-    SparseTensorEncodingAttr::DimLevelType dltp) {
-  switch (dltp) {
-  case SparseTensorEncodingAttr::DimLevelType::Compressed:
-  case SparseTensorEncodingAttr::DimLevelType::CompressedNu:
-  case SparseTensorEncodingAttr::DimLevelType::CompressedNo:
-  case SparseTensorEncodingAttr::DimLevelType::CompressedNuNo:
-    return true;
-  default:
+  if (!enc)
     return false;
-  }
-}
 
-bool mlir::sparse_tensor::isSingletonDim(
-    SparseTensorEncodingAttr::DimLevelType dltp) {
-  switch (dltp) {
-  case SparseTensorEncodingAttr::DimLevelType::Singleton:
-  case SparseTensorEncodingAttr::DimLevelType::SingletonNu:
-  case SparseTensorEncodingAttr::DimLevelType::SingletonNo:
-  case SparseTensorEncodingAttr::DimLevelType::SingletonNuNo:
-    return true;
-  default:
+  if (!isCompressedDim(tp, 0))
     return false;
-  }
-}
 
-bool mlir::sparse_tensor::isDenseDim(RankedTensorType type, uint64_t d) {
-  assert(d < static_cast<uint64_t>(type.getRank()));
-  if (auto enc = getSparseTensorEncoding(type))
-    return isDenseDim(enc.getDimLevelType()[d]);
-  return true; // unannotated tensor is dense
-}
+  for (uint64_t i = 1, e = tp.getRank(); i < e; ++i)
+    if (!isSingletonDim(tp, i))
+      return false;
 
-bool mlir::sparse_tensor::isCompressedDim(RankedTensorType type, uint64_t d) {
-  assert(d < static_cast<uint64_t>(type.getRank()));
-  if (auto enc = getSparseTensorEncoding(type))
-    return isCompressedDim(enc.getDimLevelType()[d]);
-  return false; // unannotated tensor is dense
-}
-
-bool mlir::sparse_tensor::isSingletonDim(RankedTensorType type, uint64_t d) {
-  assert(d < static_cast<uint64_t>(type.getRank()));
-  if (auto enc = getSparseTensorEncoding(type))
-    return isSingletonDim(enc.getDimLevelType()[d]);
-  return false; // unannotated tensor is dense
-}
-
-bool mlir::sparse_tensor::isOrderedDim(
-    SparseTensorEncodingAttr::DimLevelType dltp) {
-  switch (dltp) {
-  case SparseTensorEncodingAttr::DimLevelType::CompressedNo:
-  case SparseTensorEncodingAttr::DimLevelType::CompressedNuNo:
-  case SparseTensorEncodingAttr::DimLevelType::SingletonNo:
-  case SparseTensorEncodingAttr::DimLevelType::SingletonNuNo:
-    return false;
-  default:
-    return true;
-  }
-}
-
-bool mlir::sparse_tensor::isUniqueDim(
-    SparseTensorEncodingAttr::DimLevelType dltp) {
-  switch (dltp) {
-  case SparseTensorEncodingAttr::DimLevelType::CompressedNu:
-  case SparseTensorEncodingAttr::DimLevelType::CompressedNuNo:
-  case SparseTensorEncodingAttr::DimLevelType::SingletonNu:
-  case SparseTensorEncodingAttr::DimLevelType::SingletonNuNo:
-    return false;
-  default:
-    return true;
-  }
-}
-
-bool mlir::sparse_tensor::isOrderedDim(RankedTensorType type, uint64_t d) {
-  assert(d < static_cast<uint64_t>(type.getRank()));
-  if (auto enc = getSparseTensorEncoding(type))
-    return isOrderedDim(enc.getDimLevelType()[d]);
-  return true; // unannotated tensor is dense (and thus ordered)
-}
-
-bool mlir::sparse_tensor::isUniqueDim(RankedTensorType type, uint64_t d) {
-  assert(d < static_cast<uint64_t>(type.getRank()));
-  if (auto enc = getSparseTensorEncoding(type))
-    return isUniqueDim(enc.getDimLevelType()[d]);
-  return true; // unannotated tensor is dense (and thus unique)
+  // This works for rank == 1 (unique the only compressed) and rank > 1 (unique
+  // on the last singleton).
+  return isUniqueDim(tp, tp.getRank() - 1);
 }
 
 uint64_t mlir::sparse_tensor::toOrigDim(const SparseTensorEncodingAttr &enc,
@@ -422,7 +352,12 @@ LogicalResult ConvertOp::verify() {
 }
 
 OpFoldResult ConvertOp::fold(ArrayRef<Attribute> operands) {
-  if (getType() == getSource().getType())
+  Type dstType = getType();
+  // Fold trivial dense-to-dense convert and leave trivial sparse-to-sparse
+  // convert for codegen to remove. This is because we use trivial
+  // sparse-to-sparse convert to tell bufferization that the sparse codegen
+  // will expand the tensor buffer into sparse tensor storage.
+  if (!getSparseTensorEncoding(dstType) && dstType == getSource().getType())
     return getSource();
   return {};
 }
@@ -600,7 +535,7 @@ LogicalResult ConcatenateOp::verify() {
               "sum of all the concatenation dimensions of the input tensors.");
       }
     } else {
-      int prev = dstDim;
+      int64_t prev = dstDim;
       for (auto src : getInputs()) {
         auto d = src.getType().cast<RankedTensorType>().getShape()[i];
         if (prev != ShapedType::kDynamicSize && d != prev)
@@ -621,6 +556,22 @@ LogicalResult InsertOp::verify() {
   return success();
 }
 
+void PushBackOp::build(OpBuilder &builder, OperationState &result,
+                       Type outBuffer, Value bufferSizes, Value inBuffer,
+                       Value value, APInt idx) {
+  build(builder, result, outBuffer, bufferSizes, inBuffer, value, idx, Value());
+}
+
+LogicalResult PushBackOp::verify() {
+  Value n = getN();
+  if (n) {
+    auto nValue = dyn_cast_or_null<arith::ConstantIndexOp>(n.getDefiningOp());
+    if (nValue && nValue.value() < 1)
+      return emitOpError("n must be not less than 1");
+  }
+  return success();
+}
+
 LogicalResult CompressOp::verify() {
   RankedTensorType ttp = getTensor().getType().cast<RankedTensorType>();
   if (ttp.getRank() != 1 + static_cast<int64_t>(getIndices().size()))
@@ -630,11 +581,20 @@ LogicalResult CompressOp::verify() {
 
 void ForeachOp::build(
     OpBuilder &builder, OperationState &result, Value tensor,
-    function_ref<void(OpBuilder &, Location, ValueRange)> bodyBuilder) {
-  build(builder, result, tensor);
+    function_ref<void(OpBuilder &, Location, ValueRange, Value, ValueRange)>
+        bodyBuilder) {
+  build(builder, result, tensor, llvm::None, bodyBuilder);
+}
+
+void ForeachOp::build(
+    OpBuilder &builder, OperationState &result, Value tensor,
+    ValueRange initArgs,
+    function_ref<void(OpBuilder &, Location, ValueRange, Value, ValueRange)>
+        bodyBuilder) {
+  build(builder, result, initArgs.getTypes(), tensor, initArgs);
+  // Builds foreach body.
   if (!bodyBuilder)
     return;
-
   auto rtp = tensor.getType().cast<RankedTensorType>();
   int64_t rank = rtp.getRank();
 
@@ -643,23 +603,41 @@ void ForeachOp::build(
   std::fill_n(std::back_inserter(blockArgTypes), rank, builder.getIndexType());
   // Followed by one value.
   blockArgTypes.push_back(rtp.getElementType());
+  // Followed by reduction variable.
+  blockArgTypes.append(initArgs.getTypes().begin(), initArgs.getTypes().end());
 
   SmallVector<Location, 4> blockArgLocs;
-  std::fill_n(std::back_inserter(blockArgLocs), rank + 1, tensor.getLoc());
+  std::fill_n(std::back_inserter(blockArgLocs), blockArgTypes.size(),
+              tensor.getLoc());
 
   OpBuilder::InsertionGuard guard(builder);
   auto &region = *result.regions.front();
   Block *bodyBlock =
       builder.createBlock(&region, region.end(), blockArgTypes, blockArgLocs);
-  bodyBuilder(builder, result.location, bodyBlock->getArguments());
+  bodyBuilder(builder, result.location,
+              bodyBlock->getArguments().slice(0, rank),
+              bodyBlock->getArguments()[rank],
+              bodyBlock->getArguments().drop_front(rank + 1));
 }
 
 LogicalResult ForeachOp::verify() {
   auto t = getTensor().getType().cast<RankedTensorType>();
   auto args = getBody()->getArguments();
 
-  if (static_cast<size_t>(t.getRank()) + 1 != args.size())
+  if (static_cast<size_t>(t.getRank()) + 1 + getInitArgs().size() !=
+      args.size())
     return emitError("Unmatched number of arguments in the block");
+
+  if (getNumResults() != getInitArgs().size())
+    return emitError("Mismatch in number of init arguments and results");
+
+  if (getResultTypes() != getInitArgs().getTypes())
+    return emitError("Mismatch in types of init arguments and results");
+
+  auto yield = cast<YieldOp>(getBody()->getTerminator());
+  if (yield.getNumOperands() != getNumResults() ||
+      yield.getOperands().getTypes() != getResultTypes())
+    return emitError("Mismatch in types of yield values and results");
 
   for (int64_t i = 0, e = t.getRank(); i < e; i++)
     if (args[i].getType() != IndexType::get(getContext()))
@@ -667,7 +645,7 @@ LogicalResult ForeachOp::verify() {
           llvm::formatv("Expecting Index type for argument at index {0}", i));
 
   auto elemTp = t.getElementType();
-  auto valueTp = args.back().getType();
+  auto valueTp = args[t.getRank()].getType();
   if (elemTp != valueTp)
     emitError(llvm::formatv("Unmatched element type between input tensor and "
                             "block argument, expected:{0}, got: {1}",
@@ -737,6 +715,42 @@ LogicalResult SortOp::verify() {
 
   if (n)
     return checkTypes(getYs(), false);
+
+  return success();
+}
+
+LogicalResult SortCooOp::verify() {
+  auto cn = getN().getDefiningOp<arith::ConstantIndexOp>();
+  // We can't check the size of the buffers when n or buffer dimensions aren't
+  // compile-time constants.
+  if (!cn)
+    return success();
+
+  uint64_t n = cn.value();
+  uint64_t nx = 1;
+  if (auto nxAttr = getNxAttr()) {
+    nx = nxAttr.getInt();
+    if (nx < 1)
+      emitError(llvm::formatv("Expected nx > 1, got {0}", nx));
+  }
+  uint64_t ny = 0;
+  if (auto nyAttr = getNyAttr()) {
+    ny = nyAttr.getInt();
+  }
+
+  auto checkDim = [&](Value v, uint64_t min, const char *message) {
+    MemRefType tp = v.getType().cast<MemRefType>();
+    int64_t dim = tp.getShape()[0];
+    if (dim != ShapedType::kDynamicSize && dim < (int64_t)min) {
+      emitError(llvm::formatv("{0} got {1} < {2}", message, dim, min));
+    }
+  };
+
+  checkDim(getXy(), n * (nx + ny), "Expected dimension(xy) >= n * (nx + ny)");
+
+  for (Value opnd : getYs()) {
+    checkDim(opnd, n, "Expected dimension(y) >= n");
+  }
 
   return success();
 }

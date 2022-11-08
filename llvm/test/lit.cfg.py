@@ -159,6 +159,7 @@ tools.extend([
     'dsymutil', 'lli', 'lli-child-target', 'llvm-ar', 'llvm-as',
     'llvm-addr2line', 'llvm-bcanalyzer', 'llvm-bitcode-strip', 'llvm-config',
     'llvm-cov', 'llvm-cxxdump', 'llvm-cvtres', 'llvm-debuginfod-find', 'llvm-debuginfod',
+    'llvm-debuginfo-analyzer',
     'llvm-diff', 'llvm-dis', 'llvm-dwarfdump', 'llvm-dwarfutil', 'llvm-dlltool',
     'llvm-exegesis', 'llvm-extract', 'llvm-isel-fuzzer', 'llvm-ifs',
     'llvm-install-name-tool', 'llvm-jitlink', 'llvm-opt-fuzzer', 'llvm-lib',
@@ -454,6 +455,9 @@ if config.have_libxml2:
 
 if config.have_curl:
     config.available_features.add('curl')
+
+if config.have_httplib:
+    config.available_features.add('httplib')
 
 if config.have_opt_viewer_modules:
     config.available_features.add('have_opt_viewer_modules')

@@ -454,8 +454,10 @@ SourceManager::AllocateLoadedSLocEntries(unsigned NumSLocEntries,
                                          SourceLocation::UIntTy TotalSize) {
   assert(ExternalSLocEntries && "Don't have an external sloc source");
   // Make sure we're not about to run out of source locations.
-  if (CurrentLoadedOffset - TotalSize < NextLocalOffset)
+  if (CurrentLoadedOffset < TotalSize ||
+      CurrentLoadedOffset - TotalSize < NextLocalOffset) {
     return std::make_pair(0, 0);
+  }
   LoadedSLocEntryTable.resize(LoadedSLocEntryTable.size() + NumSLocEntries);
   SLocEntryLoaded.resize(LoadedSLocEntryTable.size());
   CurrentLoadedOffset -= TotalSize;
@@ -795,7 +797,7 @@ FileID SourceManager::getFileIDLocal(SourceLocation::UIntTy SLocOffset) const {
   // most newly created FileID.
 
   // LessIndex - This is the lower bound of the range that we're searching.
-  // We know that the offset corresponding to the FileID is is less than
+  // We know that the offset corresponding to the FileID is less than
   // SLocOffset.
   unsigned LessIndex = 0;
   // upper bound of the search range.

@@ -188,8 +188,7 @@ static bool usesTypeVisibility(const NamedDecl *D) {
 /// Does the given declaration have member specialization information,
 /// and if so, is it an explicit specialization?
 template <class T>
-static std::enable_if_t<!std::is_base_of<RedeclarableTemplateDecl, T>::value,
-                        bool>
+static std::enable_if_t<!std::is_base_of_v<RedeclarableTemplateDecl, T>, bool>
 isExplicitMemberSpecialization(const T *D) {
   if (const MemberSpecializationInfo *member =
         D->getMemberSpecializationInfo()) {
@@ -835,6 +834,15 @@ LinkageComputer::getLVForNamespaceScopeDecl(const NamedDecl *D,
     if (Function->getStorageClass() == SC_PrivateExtern)
       LV.mergeVisibility(HiddenVisibility, true);
 
+    // OpenMP target declare device functions are not callable from the host so
+    // they should not be exported from the device image. This applies to all
+    // functions as the host-callable kernel functions are emitted at codegen.
+    if (Context.getLangOpts().OpenMP && Context.getLangOpts().OpenMPIsDevice &&
+        ((Context.getTargetInfo().getTriple().isAMDGPU() ||
+          Context.getTargetInfo().getTriple().isNVPTX()) ||
+         OMPDeclareTargetDeclAttr::isDeclareTargetDeclaration(Function)))
+      LV.mergeVisibility(HiddenVisibility, /*newExplicit=*/false);
+
     // Note that Sema::MergeCompatibleFunctionDecls already takes care of
     // merging storage classes and visibility attributes, so we don't have to
     // look at previous decls in here.
@@ -1253,8 +1261,13 @@ LinkageInfo LinkageComputer::getLVForClosure(const DeclContext *DC,
   else if (isa<ParmVarDecl>(ContextDecl))
     Owner =
         dyn_cast<NamedDecl>(ContextDecl->getDeclContext()->getRedeclContext());
-  else
+  else if (isa<ImplicitConceptSpecializationDecl>(ContextDecl)) {
+    // Replace with the concept's owning decl, which is either a namespace or a
+    // TU, so this needs a dyn_cast.
+    Owner = dyn_cast<NamedDecl>(ContextDecl->getDeclContext());
+  } else {
     Owner = cast<NamedDecl>(ContextDecl);
+  }
 
   if (!Owner)
     return LinkageInfo::none();

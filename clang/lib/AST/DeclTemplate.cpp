@@ -353,6 +353,22 @@ void RedeclarableTemplateDecl::addSpecializationImpl(
                                       SETraits::getDecl(Entry));
 }
 
+ArrayRef<TemplateArgument> RedeclarableTemplateDecl::getInjectedTemplateArgs() {
+  TemplateParameterList *Params = getTemplateParameters();
+  auto *CommonPtr = getCommonPtr();
+  if (!CommonPtr->InjectedArgs) {
+    auto &Context = getASTContext();
+    SmallVector<TemplateArgument, 16> TemplateArgs;
+    Context.getInjectedTemplateArgs(Params, TemplateArgs);
+    CommonPtr->InjectedArgs =
+        new (Context) TemplateArgument[TemplateArgs.size()];
+    std::copy(TemplateArgs.begin(), TemplateArgs.end(),
+              CommonPtr->InjectedArgs);
+  }
+
+  return llvm::makeArrayRef(CommonPtr->InjectedArgs, Params->size());
+}
+
 //===----------------------------------------------------------------------===//
 // FunctionTemplateDecl Implementation
 //===----------------------------------------------------------------------===//
@@ -401,22 +417,6 @@ void FunctionTemplateDecl::addSpecialization(
       FunctionTemplateSpecializationInfo *Info, void *InsertPos) {
   addSpecializationImpl<FunctionTemplateDecl>(getSpecializations(), Info,
                                               InsertPos);
-}
-
-ArrayRef<TemplateArgument> FunctionTemplateDecl::getInjectedTemplateArgs() {
-  TemplateParameterList *Params = getTemplateParameters();
-  Common *CommonPtr = getCommonPtr();
-  if (!CommonPtr->InjectedArgs) {
-    auto &Context = getASTContext();
-    SmallVector<TemplateArgument, 16> TemplateArgs;
-    Context.getInjectedTemplateArgs(Params, TemplateArgs);
-    CommonPtr->InjectedArgs =
-        new (Context) TemplateArgument[TemplateArgs.size()];
-    std::copy(TemplateArgs.begin(), TemplateArgs.end(),
-              CommonPtr->InjectedArgs);
-  }
-
-  return llvm::makeArrayRef(CommonPtr->InjectedArgs, Params->size());
 }
 
 void FunctionTemplateDecl::mergePrevDecl(FunctionTemplateDecl *Prev) {
@@ -1050,6 +1050,44 @@ ConceptDecl *ConceptDecl::CreateDeserialized(ASTContext &C,
                                                 nullptr, nullptr);
 
   return Result;
+}
+
+//===----------------------------------------------------------------------===//
+// ImplicitConceptSpecializationDecl Implementation
+//===----------------------------------------------------------------------===//
+ImplicitConceptSpecializationDecl::ImplicitConceptSpecializationDecl(
+    DeclContext *DC, SourceLocation SL,
+    ArrayRef<TemplateArgument> ConvertedArgs)
+    : Decl(ImplicitConceptSpecialization, DC, SL),
+      NumTemplateArgs(ConvertedArgs.size()) {
+  setTemplateArguments(ConvertedArgs);
+}
+
+ImplicitConceptSpecializationDecl::ImplicitConceptSpecializationDecl(
+    EmptyShell Empty, unsigned NumTemplateArgs)
+    : Decl(ImplicitConceptSpecialization, Empty),
+      NumTemplateArgs(NumTemplateArgs) {}
+
+ImplicitConceptSpecializationDecl *ImplicitConceptSpecializationDecl::Create(
+    const ASTContext &C, DeclContext *DC, SourceLocation SL,
+    ArrayRef<TemplateArgument> ConvertedArgs) {
+  return new (C, DC,
+              additionalSizeToAlloc<TemplateArgument>(ConvertedArgs.size()))
+      ImplicitConceptSpecializationDecl(DC, SL, ConvertedArgs);
+}
+
+ImplicitConceptSpecializationDecl *
+ImplicitConceptSpecializationDecl::CreateDeserialized(
+    const ASTContext &C, unsigned ID, unsigned NumTemplateArgs) {
+  return new (C, ID, additionalSizeToAlloc<TemplateArgument>(NumTemplateArgs))
+      ImplicitConceptSpecializationDecl(EmptyShell{}, NumTemplateArgs);
+}
+
+void ImplicitConceptSpecializationDecl::setTemplateArguments(
+    ArrayRef<TemplateArgument> Converted) {
+  assert(Converted.size() == NumTemplateArgs);
+  std::uninitialized_copy(Converted.begin(), Converted.end(),
+                          getTrailingObjects<TemplateArgument>());
 }
 
 //===----------------------------------------------------------------------===//

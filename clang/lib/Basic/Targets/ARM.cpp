@@ -431,6 +431,19 @@ bool ARMTargetInfo::initFeatureMap(
   if (CPUArch != llvm::ARM::ArchKind::INVALID) {
     ArchFeature = ("+" + llvm::ARM::getArchName(CPUArch)).str();
     TargetFeatures.push_back(ArchFeature);
+
+    // These features are added to allow arm_neon.h target(..) attributes to
+    // match with both arm and aarch64. We need to add all previous architecture
+    // versions, so that "8.6" also allows "8.1" functions. In case of v9.x the
+    // v8.x counterparts are added too. We only need these for anything > 8.0-A.
+    for (llvm::ARM::ArchKind I = llvm::ARM::convertV9toV8(CPUArch);
+         I != llvm::ARM::ArchKind::INVALID; --I)
+      Features[llvm::ARM::getSubArch(I)] = true;
+    if (CPUArch > llvm::ARM::ArchKind::ARMV8A &&
+        CPUArch <= llvm::ARM::ArchKind::ARMV9_3A)
+      for (llvm::ARM::ArchKind I = CPUArch; I != llvm::ARM::ArchKind::INVALID;
+           --I)
+        Features[llvm::ARM::getSubArch(I)] = true;
   }
 
   // get default FPU features
@@ -692,8 +705,11 @@ void ARMTargetInfo::getTargetDefines(const LangOptions &Opts,
   // For bare-metal none-eabi.
   if (getTriple().getOS() == llvm::Triple::UnknownOS &&
       (getTriple().getEnvironment() == llvm::Triple::EABI ||
-       getTriple().getEnvironment() == llvm::Triple::EABIHF))
+       getTriple().getEnvironment() == llvm::Triple::EABIHF)) {
     Builder.defineMacro("__ELF__");
+    if (Opts.CPlusPlus)
+      Builder.defineMacro("_GNU_SOURCE");
+  }
 
   // Target properties.
   Builder.defineMacro("__REGISTER_PREFIX__", "");
@@ -801,7 +817,7 @@ void ARMTargetInfo::getTargetDefines(const LangOptions &Opts,
   if ((!SoftFloat && !SoftFloatABI) || ABI == "aapcs-vfp" || ABI == "aapcs16")
     Builder.defineMacro("__ARM_PCS_VFP", "1");
 
-  if (SoftFloat)
+  if (SoftFloat || (SoftFloatABI && !FPU))
     Builder.defineMacro("__SOFTFP__");
 
   // ACLE position independent code macros.

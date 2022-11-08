@@ -19,7 +19,6 @@
 #include "llvm/Support/MathExtras.h"
 #include <cassert>
 #include <climits>
-#include <cmath>
 #include <cstring>
 #include <utility>
 
@@ -860,8 +859,7 @@ public:
 
   /// relative logical shift right
   APInt relativeLShr(int RelativeShift) const {
-    int Shift = std::abs(RelativeShift);
-    return RelativeShift > 0 ? lshr(Shift) : shl(Shift);
+    return RelativeShift > 0 ? lshr(RelativeShift) : shl(-RelativeShift);
   }
 
   /// relative logical shift left
@@ -871,8 +869,7 @@ public:
 
   /// relative arithmetic shift right
   APInt relativeAShr(int RelativeShift) const {
-    int Shift = std::abs(RelativeShift);
-    return RelativeShift > 0 ? ashr(Shift) : shl(Shift);
+    return RelativeShift > 0 ? ashr(RelativeShift) : shl(-RelativeShift);
   }
 
   /// relative arithmetic shift left
@@ -2290,13 +2287,13 @@ void LoadIntFromMemory(APInt &IntVal, const uint8_t *Src, unsigned LoadBytes);
 template <> struct DenseMapInfo<APInt, void> {
   static inline APInt getEmptyKey() {
     APInt V(nullptr, 0);
-    V.U.VAL = 0;
+    V.U.VAL = ~0ULL;
     return V;
   }
 
   static inline APInt getTombstoneKey() {
     APInt V(nullptr, 0);
-    V.U.VAL = 1;
+    V.U.VAL = ~1ULL;
     return V;
   }
 

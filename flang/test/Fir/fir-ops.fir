@@ -322,8 +322,8 @@ func.func @bar_select_rank(%arg : i32, %arg2 : i32) -> i32 {
 }
 
 // CHECK-LABEL: func @bar_select_type(
-// CHECK-SAME: [[VAL_101:%.*]]: !fir.box<!fir.type<name(param1:i32){fld:!fir.char<1>}>>) -> i32 {
-func.func @bar_select_type(%arg : !fir.box<!fir.type<name(param1:i32){fld:!fir.char<1>}>>) -> i32 {
+// CHECK-SAME: [[VAL_101:%.*]]: !fir.class<!fir.type<name(param1:i32){fld:!fir.char<1>}>>) -> i32 {
+func.func @bar_select_type(%arg : !fir.class<!fir.type<name(param1:i32){fld:!fir.char<1>}>>) -> i32 {
 
 // CHECK: [[VAL_102:%.*]] = arith.constant 1 : i32
 // CHECK: [[VAL_103:%.*]] = arith.constant 2 : i32
@@ -334,8 +334,8 @@ func.func @bar_select_type(%arg : !fir.box<!fir.type<name(param1:i32){fld:!fir.c
   %2 = arith.constant 3 : i32
   %3 = arith.constant 4 : i32
 
-// CHECK: fir.select_type [[VAL_101]] : !fir.box<!fir.type<name(param1:i32){fld:!fir.char<1>}>> [#fir.instance<!fir.int<4>>, ^bb1([[VAL_102]] : i32), #fir.instance<!fir.int<8>>, ^bb2([[VAL_104]] : i32), #fir.subsumed<!fir.int<2>>, ^bb3([[VAL_104]] : i32), #fir.instance<!fir.int<1>>, ^bb4([[VAL_103]] : i32), unit, ^bb5]
-  fir.select_type %arg : !fir.box<!fir.type<name(param1:i32){fld:!fir.char<1>}>> [ #fir.instance<!fir.int<4>>,^bb1(%0:i32), #fir.instance<!fir.int<8>>,^bb2(%2:i32), #fir.subsumed<!fir.int<2>>,^bb3(%2:i32), #fir.instance<!fir.int<1>>,^bb4(%1:i32), unit,^bb5 ]
+// CHECK: fir.select_type [[VAL_101]] : !fir.class<!fir.type<name(param1:i32){fld:!fir.char<1>}>> [#fir.type_is<!fir.int<4>>, ^bb1([[VAL_102]] : i32), #fir.type_is<!fir.int<8>>, ^bb2([[VAL_104]] : i32), #fir.class_is<!fir.int<2>>, ^bb3([[VAL_104]] : i32), #fir.type_is<!fir.int<1>>, ^bb4([[VAL_103]] : i32), unit, ^bb5]
+  fir.select_type %arg : !fir.class<!fir.type<name(param1:i32){fld:!fir.char<1>}>> [ #fir.type_is<!fir.int<4>>,^bb1(%0:i32), #fir.type_is<!fir.int<8>>,^bb2(%2:i32), #fir.class_is<!fir.int<2>>,^bb3(%2:i32), #fir.type_is<!fir.int<1>>,^bb4(%1:i32), unit,^bb5 ]
 
 // CHECK: ^bb1([[VAL_106:%.*]]: i32):
 // CHECK: return [[VAL_106]] : i32
@@ -849,4 +849,36 @@ func.func @embox_tdesc(%arg0: !fir.class<!fir.array<10x!fir.type<derived_poly{a:
   }
   fir.store %4#1 to %0 : !fir.ref<i32>
   return
+}
+
+func.func @test_fortran_var_attrs() {
+  %0 = fir.alloca !fir.heap<f32> {fortran_attrs = #fir.var_attrs<allocatable>}
+  %1 = fir.alloca f32 {fortran_attrs = #fir.var_attrs<asynchronous>}
+  %2 = fir.alloca f32 {fortran_attrs = #fir.var_attrs<bind_c>}
+  %3 = fir.alloca f32 {fortran_attrs = #fir.var_attrs<contiguous>}
+  %4 = fir.alloca f32 {fortran_attrs = #fir.var_attrs<intent_in>}
+  %5 = fir.alloca f32 {fortran_attrs = #fir.var_attrs<intent_inout>}
+  %6 = fir.alloca f32 {fortran_attrs = #fir.var_attrs<intent_out>}
+  %7 = fir.alloca f32 {fortran_attrs = #fir.var_attrs<optional>}
+  %8 = fir.alloca f32 {fortran_attrs = #fir.var_attrs<parameter>}
+  %9 = fir.alloca !fir.ptr<f32> {fortran_attrs = #fir.var_attrs<pointer>}
+  %10 = fir.alloca f32 {fortran_attrs = #fir.var_attrs<target>}
+  %11 = fir.alloca f32 {fortran_attrs = #fir.var_attrs<value>}
+  %12 = fir.alloca f32 {fortran_attrs = #fir.var_attrs<volatile>}
+  %13 = fir.alloca !fir.box<!fir.ptr<!fir.array<?xf32>>> {fortran_attrs = #fir.var_attrs<pointer, contiguous, volatile>}
+  return
+  // CHECK: fir.alloca !fir.heap<f32> {fortran_attrs = #fir.var_attrs<allocatable>}
+  // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<asynchronous>}
+  // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<bind_c>}
+  // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<contiguous>}
+  // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<intent_in>}
+  // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<intent_inout>}
+  // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<intent_out>}
+  // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<optional>}
+  // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<parameter>}
+  // CHECK: fir.alloca !fir.ptr<f32> {fortran_attrs = #fir.var_attrs<pointer>}
+  // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<target>}
+  // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<value>}
+  // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<volatile>}
+  // CHECK: fir.alloca !fir.box<!fir.ptr<!fir.array<?xf32>>> {fortran_attrs = #fir.var_attrs<contiguous, pointer, volatile>}
 }

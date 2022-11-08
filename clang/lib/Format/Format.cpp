@@ -99,6 +99,15 @@ struct ScalarEnumerationTraits<FormatStyle::LambdaBodyIndentationKind> {
   }
 };
 
+template <>
+struct ScalarEnumerationTraits<FormatStyle::RequiresExpressionIndentationKind> {
+  static void
+  enumeration(IO &IO, FormatStyle::RequiresExpressionIndentationKind &Value) {
+    IO.enumCase(Value, "Keyword", FormatStyle::REI_Keyword);
+    IO.enumCase(Value, "OuterScope", FormatStyle::REI_OuterScope);
+  }
+};
+
 template <> struct ScalarEnumerationTraits<FormatStyle::UseTabStyle> {
   static void enumeration(IO &IO, FormatStyle::UseTabStyle &Value) {
     IO.enumCase(Value, "Never", FormatStyle::UT_Never);
@@ -201,6 +210,47 @@ template <> struct MappingTraits<FormatStyle::AlignConsecutiveStyle> {
     IO.mapOptional("AcrossComments", Value.AcrossComments);
     IO.mapOptional("AlignCompound", Value.AlignCompound);
     IO.mapOptional("PadOperators", Value.PadOperators);
+  }
+};
+
+template <>
+struct ScalarEnumerationTraits<FormatStyle::TrailingCommentsAlignmentKinds> {
+  static void enumeration(IO &IO,
+                          FormatStyle::TrailingCommentsAlignmentKinds &Value) {
+    IO.enumCase(Value, "Leave", FormatStyle::TCAS_Leave);
+    IO.enumCase(Value, "Always", FormatStyle::TCAS_Always);
+    IO.enumCase(Value, "Never", FormatStyle::TCAS_Never);
+  }
+};
+
+template <> struct MappingTraits<FormatStyle::TrailingCommentsAlignmentStyle> {
+  static void enumInput(IO &IO,
+                        FormatStyle::TrailingCommentsAlignmentStyle &Value) {
+    IO.enumCase(Value, "Leave",
+                FormatStyle::TrailingCommentsAlignmentStyle(
+                    {FormatStyle::TCAS_Leave, 1}));
+
+    IO.enumCase(Value, "Always",
+                FormatStyle::TrailingCommentsAlignmentStyle(
+                    {FormatStyle::TCAS_Always, 1}));
+
+    IO.enumCase(Value, "Never",
+                FormatStyle::TrailingCommentsAlignmentStyle(
+                    {FormatStyle::TCAS_Never, 1}));
+
+    // For backwards compatibility
+    IO.enumCase(Value, "true",
+                FormatStyle::TrailingCommentsAlignmentStyle(
+                    {FormatStyle::TCAS_Always, 1}));
+    IO.enumCase(Value, "false",
+                FormatStyle::TrailingCommentsAlignmentStyle(
+                    {FormatStyle::TCAS_Never, 1}));
+  }
+
+  static void mapping(IO &IO,
+                      FormatStyle::TrailingCommentsAlignmentStyle &Value) {
+    IO.mapOptional("Kind", Value.Kind);
+    IO.mapOptional("OverEmptyLines", Value.OverEmptyLines);
   }
 };
 
@@ -854,6 +904,8 @@ template <> struct MappingTraits<FormatStyle> {
     IO.mapOptional("RemoveBracesLLVM", Style.RemoveBracesLLVM);
     IO.mapOptional("RemoveSemicolon", Style.RemoveSemicolon);
     IO.mapOptional("RequiresClausePosition", Style.RequiresClausePosition);
+    IO.mapOptional("RequiresExpressionIndentation",
+                   Style.RequiresExpressionIndentation);
     IO.mapOptional("SeparateDefinitionBlocks", Style.SeparateDefinitionBlocks);
     IO.mapOptional("ShortNamespaceLines", Style.ShortNamespaceLines);
     IO.mapOptional("SortIncludes", Style.SortIncludes);
@@ -1183,7 +1235,6 @@ FormatStyle getLLVMStyle(FormatStyle::LanguageKind Language) {
   LLVMStyle.AlignAfterOpenBracket = FormatStyle::BAS_Align;
   LLVMStyle.AlignArrayOfStructures = FormatStyle::AIAS_None;
   LLVMStyle.AlignOperands = FormatStyle::OAS_Align;
-  LLVMStyle.AlignTrailingComments = true;
   LLVMStyle.AlignConsecutiveAssignments = {};
   LLVMStyle.AlignConsecutiveAssignments.Enabled = false;
   LLVMStyle.AlignConsecutiveAssignments.AcrossEmptyLines = false;
@@ -1193,6 +1244,9 @@ FormatStyle getLLVMStyle(FormatStyle::LanguageKind Language) {
   LLVMStyle.AlignConsecutiveBitFields = {};
   LLVMStyle.AlignConsecutiveDeclarations = {};
   LLVMStyle.AlignConsecutiveMacros = {};
+  LLVMStyle.AlignTrailingComments = {};
+  LLVMStyle.AlignTrailingComments.Kind = FormatStyle::TCAS_Always;
+  LLVMStyle.AlignTrailingComments.OverEmptyLines = 0;
   LLVMStyle.AllowAllArgumentsOnNextLine = true;
   LLVMStyle.AllowAllParametersOfDeclarationOnNextLine = true;
   LLVMStyle.AllowShortEnumsOnASingleLine = true;
@@ -1290,6 +1344,7 @@ FormatStyle getLLVMStyle(FormatStyle::LanguageKind Language) {
   LLVMStyle.PointerAlignment = FormatStyle::PAS_Right;
   LLVMStyle.ReferenceAlignment = FormatStyle::RAS_Pointer;
   LLVMStyle.RequiresClausePosition = FormatStyle::RCPS_OwnLine;
+  LLVMStyle.RequiresExpressionIndentation = FormatStyle::REI_OuterScope;
   LLVMStyle.SeparateDefinitionBlocks = FormatStyle::SDS_Leave;
   LLVMStyle.ShortNamespaceLines = 1;
   LLVMStyle.SpacesBeforeTrailingComments = 1;
@@ -1451,7 +1506,8 @@ FormatStyle getGoogleStyle(FormatStyle::LanguageKind Language) {
   if (Language == FormatStyle::LK_Java) {
     GoogleStyle.AlignAfterOpenBracket = FormatStyle::BAS_DontAlign;
     GoogleStyle.AlignOperands = FormatStyle::OAS_DontAlign;
-    GoogleStyle.AlignTrailingComments = false;
+    GoogleStyle.AlignTrailingComments = {};
+    GoogleStyle.AlignTrailingComments.Kind = FormatStyle::TCAS_Never;
     GoogleStyle.AllowShortFunctionsOnASingleLine = FormatStyle::SFS_Empty;
     GoogleStyle.AllowShortIfStatementsOnASingleLine = FormatStyle::SIS_Never;
     GoogleStyle.AlwaysBreakBeforeMultilineStrings = false;
@@ -1599,7 +1655,8 @@ FormatStyle getWebKitStyle() {
   Style.AccessModifierOffset = -4;
   Style.AlignAfterOpenBracket = FormatStyle::BAS_DontAlign;
   Style.AlignOperands = FormatStyle::OAS_DontAlign;
-  Style.AlignTrailingComments = false;
+  Style.AlignTrailingComments = {};
+  Style.AlignTrailingComments.Kind = FormatStyle::TCAS_Never;
   Style.AllowShortBlocksOnASingleLine = FormatStyle::SBS_Empty;
   Style.BreakBeforeBinaryOperators = FormatStyle::BOS_All;
   Style.BreakBeforeBraces = FormatStyle::BS_WebKit;
@@ -1862,26 +1919,37 @@ private:
   void insertBraces(SmallVectorImpl<AnnotatedLine *> &Lines,
                     tooling::Replacements &Result) {
     const auto &SourceMgr = Env.getSourceManager();
+    int OpeningBraceSurplus = 0;
     for (AnnotatedLine *Line : Lines) {
       insertBraces(Line->Children, Result);
-      if (!Line->Affected)
+      if (!Line->Affected && OpeningBraceSurplus == 0)
         continue;
       for (FormatToken *Token = Line->First; Token && !Token->Finalized;
            Token = Token->Next) {
-        if (Token->BraceCount == 0)
+        int BraceCount = Token->BraceCount;
+        if (BraceCount == 0)
           continue;
         std::string Brace;
-        if (Token->BraceCount < 0) {
-          assert(Token->BraceCount == -1);
+        if (BraceCount < 0) {
+          assert(BraceCount == -1);
+          if (!Line->Affected)
+            break;
           Brace = Token->is(tok::comment) ? "\n{" : "{";
+          ++OpeningBraceSurplus;
         } else {
-          Brace = '\n' + std::string(Token->BraceCount, '}');
+          if (OpeningBraceSurplus == 0)
+            break;
+          if (OpeningBraceSurplus < BraceCount)
+            BraceCount = OpeningBraceSurplus;
+          Brace = '\n' + std::string(BraceCount, '}');
+          OpeningBraceSurplus -= BraceCount;
         }
         Token->BraceCount = 0;
         const auto Start = Token->Tok.getEndLoc();
         cantFail(Result.add(tooling::Replacement(SourceMgr, Start, 0, Brace)));
       }
     }
+    assert(OpeningBraceSurplus == 0);
   }
 };
 

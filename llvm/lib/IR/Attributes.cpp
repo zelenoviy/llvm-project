@@ -26,6 +26,7 @@
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/ModRef.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -210,6 +211,11 @@ Attribute Attribute::getWithUWTableKind(LLVMContext &Context,
   return get(Context, UWTable, uint64_t(Kind));
 }
 
+Attribute Attribute::getWithMemoryEffects(LLVMContext &Context,
+                                          MemoryEffects ME) {
+  return get(Context, Memory, ME.toIntValue());
+}
+
 Attribute
 Attribute::getWithAllocSizeArgs(LLVMContext &Context, unsigned ElemSizeArg,
                                 const Optional<unsigned> &NumElemsArg) {
@@ -383,6 +389,26 @@ AllocFnKind Attribute::getAllocKind() const {
   return AllocFnKind(pImpl->getValueAsInt());
 }
 
+MemoryEffects Attribute::getMemoryEffects() const {
+  assert(hasAttribute(Attribute::Memory) &&
+         "Can only call getMemoryEffects() on memory attribute");
+  return MemoryEffects::createFromIntValue(pImpl->getValueAsInt());
+}
+
+static const char *getModRefStr(ModRefInfo MR) {
+  switch (MR) {
+  case ModRefInfo::NoModRef:
+    return "none";
+  case ModRefInfo::Ref:
+    return "read";
+  case ModRefInfo::Mod:
+    return "write";
+  case ModRefInfo::ModRef:
+    return "readwrite";
+  }
+  llvm_unreachable("Invalid ModRefInfo");
+}
+
 std::string Attribute::getAsString(bool InAttrGrp) const {
   if (!pImpl) return {};
 
@@ -472,6 +498,48 @@ std::string Attribute::getAsString(bool InAttrGrp) const {
     return ("allockind(\"" +
             Twine(llvm::join(parts.begin(), parts.end(), ",")) + "\")")
         .str();
+  }
+
+  if (hasAttribute(Attribute::Memory)) {
+    std::string Result;
+    raw_string_ostream OS(Result);
+    bool First = true;
+    OS << "memory(";
+
+    MemoryEffects ME = getMemoryEffects();
+
+    // Print access kind for "other" as the default access kind. This way it
+    // will apply to any new location kinds that get split out of "other".
+    ModRefInfo OtherMR = ME.getModRef(MemoryEffects::Other);
+    if (OtherMR != ModRefInfo::NoModRef || ME.getModRef() == OtherMR) {
+      First = false;
+      OS << getModRefStr(OtherMR);
+    }
+
+    for (auto Loc : MemoryEffects::locations()) {
+      ModRefInfo MR = ME.getModRef(Loc);
+      if (MR == OtherMR)
+        continue;
+
+      if (!First)
+        OS << ", ";
+      First = false;
+
+      switch (Loc) {
+      case MemoryEffects::ArgMem:
+        OS << "argmem: ";
+        break;
+      case MemoryEffects::InaccessibleMem:
+        OS << "inaccessiblemem: ";
+        break;
+      case MemoryEffects::Other:
+        llvm_unreachable("This is represented as the default access kind");
+      }
+      OS << getModRefStr(MR);
+    }
+    OS << ")";
+    OS.flush();
+    return Result;
   }
 
   // Convert target-dependent attributes to strings of the form:
@@ -768,6 +836,10 @@ AllocFnKind AttributeSet::getAllocKind() const {
   return SetNode ? SetNode->getAllocKind() : AllocFnKind::Unknown;
 }
 
+MemoryEffects AttributeSet::getMemoryEffects() const {
+  return SetNode ? SetNode->getMemoryEffects() : MemoryEffects::unknown();
+}
+
 std::string AttributeSet::getAsString(bool InAttrGrp) const {
   return SetNode ? SetNode->getAsString(InAttrGrp) : "";
 }
@@ -944,6 +1016,12 @@ AllocFnKind AttributeSetNode::getAllocKind() const {
   if (auto A = findEnumAttribute(Attribute::AllocKind))
     return A->getAllocKind();
   return AllocFnKind::Unknown;
+}
+
+MemoryEffects AttributeSetNode::getMemoryEffects() const {
+  if (auto A = findEnumAttribute(Attribute::Memory))
+    return A->getMemoryEffects();
+  return MemoryEffects::unknown();
 }
 
 std::string AttributeSetNode::getAsString(bool InAttrGrp) const {
@@ -1498,6 +1576,10 @@ AllocFnKind AttributeList::getAllocKind() const {
   return getFnAttrs().getAllocKind();
 }
 
+MemoryEffects AttributeList::getMemoryEffects() const {
+  return getFnAttrs().getMemoryEffects();
+}
+
 std::string AttributeList::getAsString(unsigned Index, bool InAttrGrp) const {
   return getAttributes(Index).getAsString(InAttrGrp);
 }
@@ -1721,6 +1803,10 @@ AttrBuilder &AttrBuilder::addUWTableAttr(UWTableKind Kind) {
   if (Kind == UWTableKind::None)
     return *this;
   return addRawIntAttr(Attribute::UWTable, uint64_t(Kind));
+}
+
+AttrBuilder &AttrBuilder::addMemoryAttr(MemoryEffects ME) {
+  return addRawIntAttr(Attribute::Memory, ME.toIntValue());
 }
 
 AttrBuilder &AttrBuilder::addAllocKindAttr(AllocFnKind Kind) {

@@ -44,10 +44,10 @@ ByteCodeEmitter::compileFunc(const FunctionDecl *FuncDecl) {
 
   // If the function decl is a member decl, the next parameter is
   // the 'this' pointer. This parameter is pop()ed from the
-  // InterStack when calling the function.
+  // InterpStack when calling the function.
   bool HasThisPointer = false;
   if (const auto *MD = dyn_cast<CXXMethodDecl>(FuncDecl);
-      MD && !MD->isStatic()) {
+      MD && MD->isInstance()) {
     HasThisPointer = true;
     ParamTypes.push_back(PT_Ptr);
     ParamOffset += align(primSize(PT_Ptr));
@@ -56,13 +56,7 @@ ByteCodeEmitter::compileFunc(const FunctionDecl *FuncDecl) {
   // Assign descriptors to all parameters.
   // Composite objects are lowered to pointers.
   for (const ParmVarDecl *PD : FuncDecl->parameters()) {
-    PrimType Ty;
-    if (llvm::Optional<PrimType> T = Ctx.classify(PD->getType())) {
-      Ty = *T;
-    } else {
-      Ty = PT_Ptr;
-    }
-
+    PrimType Ty = Ctx.classify(PD->getType()).value_or(PT_Ptr);
     Descriptor *Desc = P.createDescriptor(PD, Ty);
     ParamDescriptors.insert({ParamOffset, {Ty, Desc}});
     Params.insert({PD, ParamOffset});

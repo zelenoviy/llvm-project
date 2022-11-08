@@ -35,6 +35,11 @@ def note_fe_backend_frame_larger_than: Note<"%0">, BackendInfo;
 
 def warn_fe_backend_plugin: Warning<"%0">, BackendInfo, InGroup<BackendPlugin>;
 def err_fe_backend_plugin: Error<"%0">, BackendInfo;
+
+def warn_fe_backend_resource_limit: Warning<"%0 (%1) exceeds limit (%2) in '%3'">, BackendInfo, InGroup<BackendPlugin>;
+def err_fe_backend_resource_limit: Error<"%0 (%1) exceeds limit (%2) in '%3'">, BackendInfo;
+def note_fe_backend_resource_limit: Note<"%0 (%1) exceeds limit (%2) in '%3'">, BackendInfo;
+
 def remark_fe_backend_plugin: Remark<"%0">, BackendInfo, InGroup<RemarkBackendPlugin>;
 def note_fe_backend_plugin: Note<"%0">, BackendInfo;
 
@@ -330,5 +335,8 @@ def warn_profile_data_misexpect : Warning<
   BackendInfo,
   InGroup<MisExpect>;
 } // end of instrumentation issue category
+
+def err_extract_api_ignores_file_not_found :
+  Error<"file '%0' specified by '--extract-api-ignores=' not found">, DefaultFatal;
 
 }

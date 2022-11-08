@@ -508,11 +508,11 @@ void vector::ContractionOp::build(OpBuilder &builder, OperationState &result,
                                   ArrayRef<IteratorType> iteratorTypes) {
   result.addOperands({lhs, rhs, acc});
   result.addTypes(acc.getType());
-  result.addAttribute(::mlir::getIndexingMapsAttrName(),
+  result.addAttribute(getIndexingMapsAttrName(result.name),
                       builder.getAffineMapArrayAttr(
                           AffineMap::inferFromExprList(indexingExprs)));
   result.addAttribute(
-      ::mlir::getIteratorTypesAttrName(),
+      getIteratorTypesAttrName(result.name),
       builder.getArrayAttr(llvm::to_vector(llvm::map_range(
           iteratorTypes, [&](IteratorType t) -> mlir::Attribute {
             return IteratorTypeAttr::get(builder.getContext(), t);
@@ -533,9 +533,9 @@ void vector::ContractionOp::build(OpBuilder &builder, OperationState &result,
                                   ArrayAttr iteratorTypes, CombiningKind kind) {
   result.addOperands({lhs, rhs, acc});
   result.addTypes(acc.getType());
-  result.addAttribute(::mlir::getIndexingMapsAttrName(), indexingMaps);
-  result.addAttribute(::mlir::getIteratorTypesAttrName(), iteratorTypes);
-  result.addAttribute(ContractionOp::getKindAttrStrName(),
+  result.addAttribute(getIndexingMapsAttrName(result.name), indexingMaps);
+  result.addAttribute(getIteratorTypesAttrName(result.name), iteratorTypes);
+  result.addAttribute(getKindAttrName(result.name),
                       CombiningKindAttr::get(builder.getContext(), kind));
 }
 
@@ -570,7 +570,8 @@ ParseResult ContractionOp::parse(OpAsmParser &parser, OperationState &result) {
   // represented as an array of strings.
   // TODO: Remove this conversion once tests are fixed.
   ArrayAttr iteratorTypes =
-      result.attributes.get("iterator_types").cast<ArrayAttr>();
+      result.attributes.get(getIteratorTypesAttrName(result.name))
+          .cast<ArrayAttr>();
 
   SmallVector<Attribute> iteratorTypeAttrs;
 
@@ -579,15 +580,15 @@ ParseResult ContractionOp::parse(OpAsmParser &parser, OperationState &result) {
     if (!maybeIteratorType.has_value())
       return parser.emitError(loc) << "unexpected iterator_type (" << s << ")";
 
-    iteratorTypeAttrs.push_back(IteratorTypeAttr::get(
-        parser.getContext(), maybeIteratorType.value()));
+    iteratorTypeAttrs.push_back(
+        IteratorTypeAttr::get(parser.getContext(), maybeIteratorType.value()));
   }
-  result.attributes.set("iterator_types",
+  result.attributes.set(getIteratorTypesAttrName(result.name),
                         parser.getBuilder().getArrayAttr(iteratorTypeAttrs));
 
-  if (!result.attributes.get(ContractionOp::getKindAttrStrName())) {
+  if (!result.attributes.get(getKindAttrName(result.name))) {
     result.addAttribute(
-        ContractionOp::getKindAttrStrName(),
+        getKindAttrName(result.name),
         CombiningKindAttr::get(result.getContext(),
                                ContractionOp::getDefaultKind()));
   }
@@ -822,11 +823,9 @@ LogicalResult ContractionOp::verify() {
   return success();
 }
 
-ArrayRef<StringRef> ContractionOp::getTraitAttrNames() {
-  static constexpr StringRef names[3] = {::mlir::getIndexingMapsAttrName(),
-                                         ::mlir::getIteratorTypesAttrName(),
-                                         ContractionOp::getKindAttrStrName()};
-  return llvm::makeArrayRef(names);
+SmallVector<StringRef> ContractionOp::getTraitAttrNames() {
+  return SmallVector<StringRef>{getIndexingMapsAttrName(),
+                                getIteratorTypesAttrName(), getKindAttrName()};
 }
 
 static int64_t getResultIndex(AffineMap map, AffineExpr targetExpr) {
@@ -3085,35 +3084,6 @@ LogicalResult TransferReadOp::verify() {
                               [&](Twine t) { return emitOpError(t); });
 }
 
-/// This is a common class used for patterns of the form
-/// ```
-///    someop(memrefcast) -> someop
-/// ```
-/// It folds the source of the memref.cast into the root operation directly.
-static LogicalResult foldMemRefCast(Operation *op) {
-  bool folded = false;
-  for (OpOperand &operand : op->getOpOperands()) {
-    auto castOp = operand.get().getDefiningOp<memref::CastOp>();
-    if (castOp && memref::CastOp::canFoldIntoConsumerOp(castOp)) {
-      operand.set(castOp.getOperand());
-      folded = true;
-    }
-  }
-  return success(folded);
-}
-
-static LogicalResult foldTensorCast(Operation *op) {
-  bool folded = false;
-  for (OpOperand &operand : op->getOpOperands()) {
-    auto castOp = operand.get().getDefiningOp<tensor::CastOp>();
-    if (castOp && tensor::canFoldIntoConsumerOp(castOp)) {
-      operand.set(castOp.getOperand());
-      folded = true;
-    }
-  }
-  return success(folded);
-}
-
 template <typename TransferOp>
 static bool isInBounds(TransferOp op, int64_t resultIdx, int64_t indicesIdx) {
   // TODO: support more aggressive createOrFold on:
@@ -3198,9 +3168,9 @@ OpFoldResult TransferReadOp::fold(ArrayRef<Attribute>) {
   /// transfer_read(memrefcast) -> transfer_read
   if (succeeded(foldTransferInBoundsAttribute(*this)))
     return getResult();
-  if (succeeded(foldMemRefCast(*this)))
+  if (succeeded(memref::foldMemRefCast(*this)))
     return getResult();
-  if (succeeded(foldTensorCast(*this)))
+  if (succeeded(tensor::foldTensorCast(*this)))
     return getResult();
   return OpFoldResult();
 }
@@ -3648,7 +3618,7 @@ LogicalResult TransferWriteOp::fold(ArrayRef<Attribute> operands,
     return success();
   if (succeeded(foldTransferInBoundsAttribute(*this)))
     return success();
-  return foldMemRefCast(*this);
+  return memref::foldMemRefCast(*this);
 }
 
 Optional<SmallVector<int64_t, 4>> TransferWriteOp::getShapeForUnroll() {
@@ -3948,7 +3918,7 @@ LogicalResult vector::LoadOp::verify() {
 }
 
 OpFoldResult LoadOp::fold(ArrayRef<Attribute>) {
-  if (succeeded(foldMemRefCast(*this)))
+  if (succeeded(memref::foldMemRefCast(*this)))
     return getResult();
   return OpFoldResult();
 }
@@ -3982,7 +3952,7 @@ LogicalResult vector::StoreOp::verify() {
 
 LogicalResult StoreOp::fold(ArrayRef<Attribute> operands,
                             SmallVectorImpl<OpFoldResult> &results) {
-  return foldMemRefCast(*this);
+  return memref::foldMemRefCast(*this);
 }
 
 //===----------------------------------------------------------------------===//
@@ -4034,7 +4004,7 @@ void MaskedLoadOp::getCanonicalizationPatterns(RewritePatternSet &results,
 }
 
 OpFoldResult MaskedLoadOp::fold(ArrayRef<Attribute>) {
-  if (succeeded(foldMemRefCast(*this)))
+  if (succeeded(memref::foldMemRefCast(*this)))
     return getResult();
   return OpFoldResult();
 }
@@ -4086,7 +4056,7 @@ void MaskedStoreOp::getCanonicalizationPatterns(RewritePatternSet &results,
 
 LogicalResult MaskedStoreOp::fold(ArrayRef<Attribute> operands,
                                   SmallVectorImpl<OpFoldResult> &results) {
-  return foldMemRefCast(*this);
+  return memref::foldMemRefCast(*this);
 }
 
 //===----------------------------------------------------------------------===//
@@ -5031,6 +5001,14 @@ LogicalResult MaskOp::verify() {
 
   return success();
 }
+
+// MaskingOpInterface definitions.
+
+/// Returns the operation masked by this 'vector.mask'.
+Operation *MaskOp::getMaskableOp() { return &getMaskRegion().front().front(); }
+
+/// Returns true if 'vector.mask' has a passthru value.
+bool MaskOp::hasPassthru() { return getPassthru() != Value(); }
 
 //===----------------------------------------------------------------------===//
 // ScanOp

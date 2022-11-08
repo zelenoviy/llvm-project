@@ -18,7 +18,6 @@
 #include <__iterator/back_insert_iterator.h>
 #include <__iterator/concepts.h>
 #include <__utility/move.h>
-#include <concepts>
 #include <cstddef>
 
 #ifndef _LIBCPP_HAS_NO_LOCALIZATION
@@ -100,8 +99,8 @@ public:
     return *__loc_;
   }
 #endif
-  _LIBCPP_HIDE_FROM_ABI iterator out() { return __out_it_; }
-  _LIBCPP_HIDE_FROM_ABI void advance_to(iterator __it) { __out_it_ = __it; }
+  _LIBCPP_HIDE_FROM_ABI iterator out() { return std::move(__out_it_); }
+  _LIBCPP_HIDE_FROM_ABI void advance_to(iterator __it) { __out_it_ = std::move(__it); }
 
 private:
   iterator __out_it_;

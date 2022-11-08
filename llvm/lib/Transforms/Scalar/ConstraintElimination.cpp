@@ -196,15 +196,20 @@ static int64_t multiplyWithOverflow(int64_t A, int64_t B) {
   return Result;
 }
 
+// A helper to add 2 signed integers where overflowing is allowed.
+static int64_t addWithOverflow(int64_t A, int64_t B) {
+  int64_t Result;
+  AddOverflow(A, B, Result);
+  return Result;
+}
+
 static SmallVector<DecompEntry, 4>
 decomposeGEP(GetElementPtrInst &GEP,
              SmallVector<PreconditionTy, 4> &Preconditions, bool IsSigned,
              const DataLayout &DL) {
   // Do not reason about pointers where the index size is larger than 64 bits,
   // as the coefficients used to encode constraints are 64 bit integers.
-  unsigned AS =
-      cast<PointerType>(GEP.getPointerOperand()->getType())->getAddressSpace();
-  if (DL.getIndexSizeInBits(AS) > 64)
+  if (DL.getIndexTypeSizeInBits(GEP.getPointerOperand()->getType()) > 64)
     return {};
 
   if (!GEP.isInBounds())
@@ -213,7 +218,7 @@ decomposeGEP(GetElementPtrInst &GEP,
   // Handle the (gep (gep ....), C) case by incrementing the constant
   // coefficient of the inner GEP, if C is a constant.
   auto *InnerGEP = dyn_cast<GetElementPtrInst>(GEP.getPointerOperand());
-  if (InnerGEP && InnerGEP->getNumOperands() == 2 &&
+  if (InnerGEP && GEP.getNumOperands() == 2 &&
       isa<ConstantInt>(GEP.getOperand(1))) {
     APInt Offset = cast<ConstantInt>(GEP.getOperand(1))->getValue();
     auto Result = decompose(InnerGEP, Preconditions, IsSigned, DL);
@@ -225,7 +230,9 @@ decomposeGEP(GetElementPtrInst &GEP,
     int64_t Scale = static_cast<int64_t>(
         DL.getTypeAllocSize(GTI.getIndexedType()).getFixedSize());
 
-    Result[0].Coefficient += multiplyWithOverflow(Scale, Offset.getSExtValue());
+    Result[0].Coefficient =
+        addWithOverflow(Result[0].Coefficient,
+                        multiplyWithOverflow(Scale, Offset.getSExtValue()));
     if (Offset.isNegative()) {
       // Add pre-condition ensuring the GEP is increasing monotonically and
       // can be de-composed.
@@ -257,63 +264,29 @@ decomposeGEP(GetElementPtrInst &GEP,
         continue;
 
       // Add offset to constant factor.
-      Result[0].Coefficient +=
-          DL.getStructLayout(STy)->getElementOffset(FieldNo);
+      Result[0].Coefficient = addWithOverflow(
+          Result[0].Coefficient,
+          int64_t(DL.getStructLayout(STy)->getElementOffset(FieldNo)));
       continue;
     }
 
     // For an array/pointer, add the element offset, explicitly scaled.
     unsigned Scale = DL.getTypeAllocSize(GTI.getIndexedType()).getFixedSize();
 
-    Value *Op0, *Op1;
-    ConstantInt *CI;
-    // If the index is zero-extended, it is guaranteed to be positive.
-    if (match(Index, m_ZExt(m_Value(Op0)))) {
-      if (match(Op0, m_NUWShl(m_Value(Op1), m_ConstantInt(CI))) &&
-          canUseSExt(CI)) {
-        Result.emplace_back(
-            multiplyWithOverflow(
-                Scale, int64_t(std::pow(int64_t(2), CI->getSExtValue()))),
-            Op1);
-        continue;
-      }
-
-      if (match(Op0, m_NSWAdd(m_Value(Op1), m_ConstantInt(CI))) &&
-          canUseSExt(CI) && match(Op0, m_NUWAdd(m_Value(), m_Value()))) {
-        Result[0].Coefficient +=
-            multiplyWithOverflow(Scale, CI->getSExtValue());
-        Result.emplace_back(Scale, Op1);
-        continue;
-      }
-
-      Result.emplace_back(Scale, Op0, true);
-      continue;
-    }
-
-    if (match(Index, m_ConstantInt(CI)) && !CI->isNegative() &&
-        canUseSExt(CI)) {
-      Result[0].Coefficient += multiplyWithOverflow(Scale, CI->getSExtValue());
-      continue;
-    }
-
-    if (match(Index, m_NSWShl(m_Value(Op0), m_ConstantInt(CI))) &&
-        canUseSExt(CI)) {
-      Result.emplace_back(
-          multiplyWithOverflow(
-              Scale, int64_t(std::pow(int64_t(2), CI->getSExtValue()))),
-          Op0);
-    } else if (match(Index, m_NSWAdd(m_Value(Op0), m_ConstantInt(CI))) &&
-               canUseSExt(CI)) {
-      Result[0].Coefficient += multiplyWithOverflow(Scale, CI->getSExtValue());
-      Result.emplace_back(Scale, Op0);
+    auto IdxResult = decompose(Index, Preconditions, IsSigned, DL);
+    if (IdxResult.empty()) {
+      Result.emplace_back(Scale, Index);
     } else {
-      Op0 = Index;
-      Result.emplace_back(Scale, Op0);
+      for (auto &KV : IdxResult)
+        KV.Coefficient = multiplyWithOverflow(KV.Coefficient, Scale);
+      Result[0].Coefficient += IdxResult[0].Coefficient;
+      append_range(Result, ArrayRef<DecompEntry>(IdxResult).drop_front());
     }
     // If Op0 is signed non-negative, the GEP is increasing monotonically and
     // can be de-composed.
-    Preconditions.emplace_back(CmpInst::ICMP_SGE, Op0,
-                               ConstantInt::get(Op0->getType(), 0));
+    if (!isKnownNonNegative(Index, DL, /*Depth=*/MaxAnalysisRecursionDepth - 1))
+      Preconditions.emplace_back(CmpInst::ICMP_SGE, Index,
+                                 ConstantInt::get(Index->getType(), 0));
   }
   return Result;
 }
@@ -327,8 +300,8 @@ decompose(Value *V, SmallVector<PreconditionTy, 4> &Preconditions,
           bool IsSigned, const DataLayout &DL) {
 
   auto MergeResults = [&Preconditions, IsSigned,
-                       DL](Value *A, Value *B,
-                           bool IsSignedB) -> SmallVector<DecompEntry, 4> {
+                       &DL](Value *A, Value *B,
+                            bool IsSignedB) -> SmallVector<DecompEntry, 4> {
     auto ResA = decompose(A, Preconditions, IsSigned, DL);
     auto ResB = decompose(B, Preconditions, IsSignedB, DL);
     if (ResA.empty() || ResB.empty())
@@ -373,6 +346,17 @@ decompose(Value *V, SmallVector<PreconditionTy, 4> &Preconditions,
   if (match(V, m_NUWAdd(m_Value(Op0), m_Value(Op1)))) {
     return MergeResults(Op0, Op1, IsSigned);
   }
+  if (match(V, m_NSWAdd(m_Value(Op0), m_Value(Op1)))) {
+    if (!isKnownNonNegative(Op0, DL, /*Depth=*/MaxAnalysisRecursionDepth - 1))
+      Preconditions.emplace_back(CmpInst::ICMP_SGE, Op0,
+                                 ConstantInt::get(Op0->getType(), 0));
+    if (!isKnownNonNegative(Op1, DL, /*Depth=*/MaxAnalysisRecursionDepth - 1))
+      Preconditions.emplace_back(CmpInst::ICMP_SGE, Op1,
+                                 ConstantInt::get(Op1->getType(), 0));
+
+    return MergeResults(Op0, Op1, IsSigned);
+  }
+
   if (match(V, m_Add(m_Value(Op0), m_ConstantInt(CI))) && CI->isNegative() &&
       canUseSExt(CI)) {
     Preconditions.emplace_back(
@@ -764,6 +748,7 @@ void State::addInfoFor(BasicBlock &BB) {
 
 static bool checkAndReplaceCondition(CmpInst *Cmp, ConstraintInfo &Info) {
   LLVM_DEBUG(dbgs() << "Checking " << *Cmp << "\n");
+
   CmpInst::Predicate Pred = Cmp->getPredicate();
   Value *A = Cmp->getOperand(0);
   Value *B = Cmp->getOperand(1);
@@ -787,7 +772,6 @@ static bool checkAndReplaceCondition(CmpInst *Cmp, ConstraintInfo &Info) {
   });
 
   bool Changed = false;
-  LLVMContext &Ctx = Cmp->getModule()->getContext();
   if (CSToUse.isConditionImplied(R.Coefficients)) {
     if (!DebugCounter::shouldExecute(EliminatedCounter))
       return false;
@@ -796,7 +780,9 @@ static bool checkAndReplaceCondition(CmpInst *Cmp, ConstraintInfo &Info) {
       dbgs() << "Condition " << *Cmp << " implied by dominating constraints\n";
       dumpWithNames(CSToUse, Info.getValue2Index(R.IsSigned));
     });
-    Cmp->replaceUsesWithIf(ConstantInt::getTrue(Ctx), [](Use &U) {
+    Constant *TrueC =
+        ConstantInt::getTrue(CmpInst::makeCmpResultType(Cmp->getType()));
+    Cmp->replaceUsesWithIf(TrueC, [](Use &U) {
       // Conditions in an assume trivially simplify to true. Skip uses
       // in assume calls to not destroy the available information.
       auto *II = dyn_cast<IntrinsicInst>(U.getUser());
@@ -813,7 +799,9 @@ static bool checkAndReplaceCondition(CmpInst *Cmp, ConstraintInfo &Info) {
       dbgs() << "Condition !" << *Cmp << " implied by dominating constraints\n";
       dumpWithNames(CSToUse, Info.getValue2Index(R.IsSigned));
     });
-    Cmp->replaceAllUsesWith(ConstantInt::getFalse(Ctx));
+    Constant *FalseC =
+        ConstantInt::getFalse(CmpInst::makeCmpResultType(Cmp->getType()));
+    Cmp->replaceAllUsesWith(FalseC);
     NumCondsRemoved++;
     Changed = true;
   }

@@ -84,6 +84,7 @@ DefinedData *WasmSym::dsoHandle;
 DefinedData *WasmSym::dataEnd;
 DefinedData *WasmSym::globalBase;
 DefinedData *WasmSym::heapBase;
+DefinedData *WasmSym::heapEnd;
 DefinedData *WasmSym::initMemoryFlag;
 GlobalSymbol *WasmSym::stackPointer;
 DefinedData *WasmSym::stackLow;
@@ -456,6 +457,7 @@ void printTraceSymbol(Symbol *sym) {
 
 const char *defaultModule = "env";
 const char *functionTableName = "__indirect_function_table";
+const char *memoryName = "memory";
 
 } // namespace wasm
 } // namespace lld

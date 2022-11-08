@@ -77,6 +77,15 @@ add_gen_header(
 )
 
 add_gen_header(
+  setjmp
+  DEF_FILE setjmp.h.def
+  GEN_HDR setjmp.h
+  DEPENDS
+    .llvm_libc_common_h
+    .llvm-libc-types.jmp_buf
+)
+
+add_gen_header(
   string
   DEF_FILE string.h.def
   GEN_HDR string.h
@@ -93,6 +102,7 @@ add_gen_header(
     .llvm_libc_common_h
     .llvm-libc-macros.time_macros
     .llvm-libc-types.time_t
+    .llvm-libc-types.clock_t
     .llvm-libc-types.clockid_t
     .llvm-libc-types.struct_tm
     .llvm-libc-types.struct_timespec
@@ -134,9 +144,11 @@ add_gen_header(
     ../config/${LIBC_TARGET_OS}/signal.h.in
   DEPENDS
     .llvm-libc-macros.signal_macros
-    .llvm-libc-types.struct_sigaction
     .llvm-libc-types.__sighandler_t
     .llvm-libc-types.sigset_t
+    .llvm-libc-types.sig_atomic_t
+    .llvm-libc-types.stack_t
+    .llvm-libc-types.struct_sigaction
     .llvm-libc-types.pid_t
 )
 
@@ -147,8 +159,10 @@ add_gen_header(
   DEPENDS
     .llvm_libc_common_h
     .llvm-libc-macros.file_seek_macros
+    .llvm-libc-macros.stdio_macros
     .llvm-libc-types.cookie_io_functions_t
     .llvm-libc-types.FILE
+    .llvm-libc-types.off_t
     .llvm-libc-types.size_t
 )
 
@@ -183,6 +197,7 @@ add_gen_header(
     .llvm-libc-types.size_t
     .llvm-libc-types.ssize_t
     .llvm-libc-types.uid_t
+    .llvm-libc-types.__getoptargv_t
 )
 
 add_gen_header(
@@ -301,6 +316,22 @@ add_gen_header(
 )
 
 add_gen_header(
+  sys_select
+  DEF_FILE sys/select.h.def
+  GEN_HDR sys/select.h
+  DEPENDS
+    .llvm_libc_common_h
+    .llvm-libc-macros.sys_select_macros
+    .llvm-libc-types.fd_set
+    .llvm-libc-types.sigset_t
+    .llvm-libc-types.struct_timespec
+    .llvm-libc-types.struct_timeval
+    .llvm-libc-types.suseconds_t
+    .llvm-libc-types.time_t
+    .llvm-libc-types.ssize_t
+)
+
+add_gen_header(
   sys_sendfile
   DEF_FILE sys/sendfile.h.def
   GEN_HDR sys/sendfile.h
@@ -331,6 +362,35 @@ add_gen_header(
 )
 
 add_gen_header(
+  sys_types
+  DEF_FILE sys/types.h.def
+  GEN_HDR sys/types.h
+  DEPENDS
+    .llvm_libc_common_h
+    .llvm-libc-types.blkcnt_t
+    .llvm-libc-types.blksize_t
+    .llvm-libc-types.clockid_t
+    .llvm-libc-types.dev_t
+    .llvm-libc-types.gid_t
+    .llvm-libc-types.ino_t
+    .llvm-libc-types.mode_t
+    .llvm-libc-types.nlink_t
+    .llvm-libc-types.off_t
+    .llvm-libc-types.pid_t
+    .llvm-libc-types.pthread_attr_t
+    .llvm-libc-types.pthread_key_t
+    .llvm-libc-types.pthread_mutex_t
+    .llvm-libc-types.pthread_mutexattr_t
+    .llvm-libc-types.pthread_once_t
+    .llvm-libc-types.pthread_t
+    .llvm-libc-types.size_t
+    .llvm-libc-types.ssize_t
+    .llvm-libc-types.suseconds_t
+    .llvm-libc-types.time_t
+    .llvm-libc-types.uid_t
+)
+
+add_gen_header(
   sys_utsname
   DEF_FILE sys/utsname.h.def
   GEN_HDR sys/utsname.h
@@ -348,6 +408,19 @@ add_gen_header(
     .llvm-libc-macros.sys_wait_macros
     .llvm-libc-types.pid_t
     .llvm-libc-types.struct_rusage
+)
+
+add_gen_header(
+  termios
+  DEF_FILE termios.h.def
+  GEN_HDR termios.h
+  DEPENDS
+    .llvm_libc_common_h
+    .llvm-libc-macros.termios_macros
+    .llvm-libc-types.cc_t
+    .llvm-libc-types.speed_t
+    .llvm-libc-types.struct_termios
+    .llvm-libc-types.tcflag_t
 )
 
 if(NOT LLVM_LIBC_FULL_BUILD)

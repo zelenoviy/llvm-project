@@ -1154,6 +1154,24 @@ void llvm::thinLTOFinalizeInModule(Module &TheModule,
       GO.setLinkage(GlobalValue::AvailableExternallyLinkage);
     }
   }
+  bool Changed;
+  do {
+    Changed = false;
+    // If an alias references a GlobalValue in a non-prevailing comdat, change
+    // it to available_externally. For simplicity we don't handle ConstantExpr
+    // aliasee, which is unlikely used in a COMDAT.
+    for (auto &GA : TheModule.aliases()) {
+      if (GA.hasAvailableExternallyLinkage())
+        continue;
+      assert(isa<GlobalValue>(GA.getAliasee()) &&
+             "non-GlobalValue aliasee is unimplemented");
+      if (const auto *GV = dyn_cast<GlobalValue>(GA.getAliasee()))
+        if (GV->hasAvailableExternallyLinkage()) {
+          GA.setLinkage(GlobalValue::AvailableExternallyLinkage);
+          Changed = true;
+        }
+    }
+  } while (Changed);
 }
 
 /// Run internalization on \p TheModule based on symmary analysis.

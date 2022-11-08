@@ -8,8 +8,7 @@ Date and Time Functions
 Source location
 ---------------
 
--   The main source for string functions is located at:
-    ``libc/src/time``
+-   The main source for time functions is located at: ``libc/src/time``
 
 ---------------------
 Implementation Status
@@ -41,7 +40,7 @@ clock_nanosleep
 clock_settime
 ctime
 ctime_r
-difftime
+difftime              |check|
 getdate
 gmtime                |check|
 gmtime_r              |check|
