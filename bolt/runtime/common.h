@@ -387,10 +387,12 @@ int __madvise(void *addr, size_t length, int advice) {
   return ret;
 }
 
+#ifndef __HAIKU__
 struct timespec {
   uint64_t tv_sec;  /* seconds */
   uint64_t tv_nsec; /* nanoseconds */
 };
+#endif
 
 uint64_t __nanosleep(const timespec *req, timespec *rem) {
   uint64_t ret;

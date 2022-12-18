@@ -18,6 +18,10 @@
 #include <getopt.h>
 #include <unistd.h>
 
+#ifdef __HAIKU__
+  extern int optreset;
+#endif
+
 #else
 
 #include <lldb/Host/common/GetOptInc.h>
