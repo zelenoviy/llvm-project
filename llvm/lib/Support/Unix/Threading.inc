@@ -49,6 +49,11 @@
 #include <unistd.h>      // For syscall()
 #endif
 
+#if defined(__HAIKU__)
+#include <kernel/OS.h>
+#include <kernel/scheduler.h>
+#endif
+
 namespace llvm {
 pthread_t
 llvm_execute_on_thread_impl(void *(*ThreadFunc)(void *), void *Arg,
@@ -147,6 +152,8 @@ static constexpr uint32_t get_max_thread_name_length_impl() {
   return 16;
 #elif defined(__OpenBSD__)
   return 32;
+#elif defined(__HAIKU__)
+  return B_OS_NAME_LENGTH;
 #else
   return 0;
 #endif
@@ -183,6 +190,8 @@ void llvm::set_thread_name(const Twine &Name) {
     const_cast<char *>(NameStr.data()));
 #elif defined(__APPLE__)
   ::pthread_setname_np(NameStr.data());
+#elif defined(__HAIKU__)
+  rename_thread(find_thread(NULL),NameStr.data());
 #endif
 }
 
@@ -237,6 +246,11 @@ void llvm::get_thread_name(SmallVectorImpl<char> &Name) {
   ::pthread_get_name_np(::pthread_self(), buf, len);
 
   Name.append(buf, buf + strlen(buf));
+#elif defined(__HAIKU__)
+  thread_info info;
+  if (get_thread_info(find_thread(NULL),&info) == B_OK) {
+    Name.append(info.name, info.name + strlen(info.name));
+  }
 #elif defined(__linux__)
 #if HAVE_PTHREAD_GETNAME_NP
   constexpr uint32_t len = get_max_thread_name_length_impl();
@@ -284,6 +298,18 @@ SetThreadPriorityResult llvm::set_thread_priority(ThreadPriority Priority) {
   return !pthread_set_qos_class_self_np(qosClass, 0)
              ? SetThreadPriorityResult::SUCCESS
              : SetThreadPriorityResult::FAILURE;
+#elif defined(__HAIKU__)
+  const auto hPriority = [&](){
+    switch (Priority) {
+      case ThreadPriority::Background: return B_LOWEST_ACTIVE_PRIORITY;
+      case ThreadPriority::Low: return B_LOW_PRIORITY;
+      case ThreadPriority::Default: return B_NORMAL_PRIORITY;
+    }
+  }();
+  return ::set_thread_priority(find_thread(NULL), hPriority) >= 0
+    ? SetThreadPriorityResult::SUCCESS
+    : SetThreadPriorityResult::FAILURE;
+
 #endif
   return SetThreadPriorityResult::FAILURE;
 }
@@ -301,6 +327,10 @@ int computeHostNumHardwareThreads() {
   cpu_set_t Set;
   if (sched_getaffinity(0, sizeof(Set), &Set) == 0)
     return CPU_COUNT(&Set);
+#elif defined(__HAIKU__)
+  system_info sysinfo;
+  if (get_system_info(&sysinfo) == B_OK)
+    return sysinfo.cpu_count;
 #endif
   // Guard against std::thread::hardware_concurrency() returning 0.
   if (unsigned Val = std::thread::hardware_concurrency())
