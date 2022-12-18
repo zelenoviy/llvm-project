@@ -61,6 +61,8 @@ if (C_SUPPORTS_NODEFAULTLIBS_FLAG)
                         shell32 user32 kernel32 mingw32 ${MINGW_RUNTIME}
                         moldname mingwex msvcrt)
     list(APPEND CMAKE_REQUIRED_LIBRARIES ${MINGW_LIBRARIES})
+  elseif (HAIKU)
+    list(APPEND CMAKE_REQUIRED_LIBRARIES root)
   endif()
 endif ()
 
