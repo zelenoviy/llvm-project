@@ -11,11 +11,13 @@
 #include "Arch/Mips.h"
 #include "Arch/Sparc.h"
 #include "CommonArgs.h"
+#include "clang/Config/config.h" // C_INCLUDE_DIRS
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/Options.h"
 #include "clang/Driver/SanitizerArgs.h"
 #include "llvm/Option/ArgList.h"
+#include "llvm/Support/Process.h"
 #include "llvm/Support/VirtualFileSystem.h"
 
 using namespace clang::driver;
@@ -125,22 +127,39 @@ void haiku::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       if (ToolChain.ShouldLinkCXXStdlib(Args))
         ToolChain.AddCXXStdlibLibArgs(Args, CmdArgs);
     }
+
     CmdArgs.push_back("-lgcc");
-    CmdArgs.push_back("--push-state");
-    CmdArgs.push_back("--as-needed");
-    CmdArgs.push_back("-lgcc_s");
-    CmdArgs.push_back("--pop-state");
+
+    if (Args.hasArg(options::OPT_static)) {
+      CmdArgs.push_back("-lgcc_eh");
+    } else {
+      CmdArgs.push_back("--push-state");
+      CmdArgs.push_back("--as-needed");
+      CmdArgs.push_back("-lgcc_s");
+      CmdArgs.push_back("--no-as-needed");
+      CmdArgs.push_back("--pop-state");
+    }
+
     CmdArgs.push_back("-lroot");
     CmdArgs.push_back("-lgcc");
-    CmdArgs.push_back("--push-state");
-    CmdArgs.push_back("--as-needed");
-    CmdArgs.push_back("-lgcc_s");
-    CmdArgs.push_back("--pop-state");
+
+    if (Args.hasArg(options::OPT_static)) {
+      CmdArgs.push_back("-lgcc_eh");
+    } else {
+      CmdArgs.push_back("--push-state");
+      CmdArgs.push_back("--as-needed");
+      CmdArgs.push_back("-lgcc_s");
+      CmdArgs.push_back("--no-as-needed");
+      CmdArgs.push_back("--pop-state");
+    }
   }
 
   if (!Args.hasArg(options::OPT_nostdlib, options::OPT_nostartfiles,
                    options::OPT_r)) {
-    CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtendS.o")));
+    if (Args.hasArg(options::OPT_shared) /*|| IsPIE*/)
+      CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtendS.o")));
+    else
+      CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtend.o")));
     CmdArgs.push_back(Args.MakeArgString(ToolChain.GetFilePath("crtn.o")));
   }
 
@@ -158,7 +177,12 @@ Haiku::Haiku(const Driver &D, const llvm::Triple &Triple,
                  const ArgList &Args)
     : Generic_ELF(D, Triple, Args) {
 
-  getFilePaths().push_back(concat(getDriver().SysRoot, "/boot/system/develop/lib"));
+  GCCInstallation.init(Triple, Args);
+
+  path_list &Paths = getFilePaths();
+  addPathIfExists(D, GCCInstallation.getInstallPath(),Paths);
+  addPathIfExists(D, "/boot/system/non-packaged/develop/lib/",Paths);
+  addPathIfExists(D, "/boot/system/develop/lib",Paths);
 }
 
 ToolChain::CXXStdlibType Haiku::GetDefaultCXXStdlibType() const {
@@ -166,8 +190,78 @@ ToolChain::CXXStdlibType Haiku::GetDefaultCXXStdlibType() const {
 }
 
 unsigned Haiku::GetDefaultDwarfVersion() const {
-  return 2;
+  // Haiku Debugger supports DWARFVersion up to 3;
+  return 3;
 }
+
+void Haiku::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
+                                              ArgStringList &CC1Args) const {
+  if (DriverArgs.hasArg(options::OPT_nostdinc))
+    return;
+
+  if (!DriverArgs.hasArg(options::OPT_nobuiltininc)) {
+    SmallString<128> Dir(getDriver().ResourceDir);
+    llvm::sys::path::append(Dir, "include");
+    addSystemInclude(DriverArgs, CC1Args, Dir.str());
+  }
+
+  if (DriverArgs.hasArg(options::OPT_nostdlibinc))
+    return;
+
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/app");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/device");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/drivers");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/game");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/interface");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/kernel");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/locale");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/mail");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/media");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/midi");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/midi2");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/net");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/opengl");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/storage");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/support");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/translation");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/add-ons/graphics");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/add-ons/input_server");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/add-ons/mail_daemon");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/add-ons/registrar");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/add-ons/screen_saver");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/add-ons/tracker");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/be_apps/NetPositive");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/os/be_apps/Tracker");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/bsd");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/glibc");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/gnu");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/posix");
+  addSystemInclude(DriverArgs, CC1Args, "/boot/system/develop/headers/");
+
+//  if (auto Val = llvm::sys::Process::GetEnv("BEINCLUDES")) {
+//    SmallVector<StringRef, 8> Dirs;
+//    StringRef(*Val).split(Dirs, ";", /*MaxSplit=*/-1, /*KeepEmpty=*/false);
+//    if (!Dirs.empty())
+//      addSystemIncludes(DriverArgs, CC1Args, Dirs);
+//  }
+
+  // Check for configure-time C include directories.
+  StringRef CIncludeDirs(C_INCLUDE_DIRS);
+  if (CIncludeDirs != "") {
+    SmallVector<StringRef, 5> dirs;
+    CIncludeDirs.split(dirs, ":");
+    for (StringRef dir : dirs) {
+      StringRef Prefix =
+          llvm::sys::path::is_absolute(dir) ? StringRef(getDriver().SysRoot) : "";
+      addExternCSystemInclude(DriverArgs, CC1Args, Prefix + dir);
+    }
+    return;
+  }
+
+  return;
+}
+
 
 void Haiku::addLibCxxIncludePaths(const llvm::opt::ArgList &DriverArgs,
                                     llvm::opt::ArgStringList &CC1Args) const {
@@ -175,6 +269,9 @@ void Haiku::addLibCxxIncludePaths(const llvm::opt::ArgList &DriverArgs,
                    getDriver().SysRoot + "/system/develop/headers/c++/v1");
 }
 
+// is this override neccessary ?
+// GCCInstallation provide valid path (but! into '/boot/system/develop/tools/lib/gcc/x86_64-unknown-haiku/11.2.0/include/c++')
+// dup paths ?
 void Haiku::addLibStdCxxIncludePaths(
     const llvm::opt::ArgList &DriverArgs,
     llvm::opt::ArgStringList &CC1Args) const {

@@ -2106,6 +2106,15 @@ bool Generic_GCC::GCCInstallationDetector::getBiarchSibling(Multilib &M) const {
 void Generic_GCC::GCCInstallationDetector::AddDefaultGCCPrefixes(
     const llvm::Triple &TargetTriple, SmallVectorImpl<std::string> &Prefixes,
     StringRef SysRoot) {
+
+  if (TargetTriple.getOS() == llvm::Triple::Haiku) {
+    std::string PrefixDir = concat(SysRoot, "/boot/system/develop/tools/");
+    std::string LibPrefix = PrefixDir + "/lib/gcc/" + TargetTriple.str();
+    if (D.getVFS().exists(LibPrefix))
+        Prefixes.push_back(PrefixDir);
+     return;
+  }
+
   if (TargetTriple.getOS() == llvm::Triple::Solaris) {
     // Solaris is a special case.
     // The GCC installation is under
