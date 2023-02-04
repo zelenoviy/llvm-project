@@ -60,7 +60,8 @@ void haiku::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     if (Args.hasArg(options::OPT_shared)) {
       CmdArgs.push_back("-Bshareable");
     }
-    CmdArgs.push_back("--enable-new-dtags");
+    // we don't yet support "new" dtags (e.g DT_RUNPATH...)
+    CmdArgs.push_back("--disable-new-dtags");
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_G)) {
