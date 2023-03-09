@@ -411,6 +411,7 @@ void InitHeaderSearch::AddDefaultIncludePaths(const LangOptions &Lang,
   case llvm::Triple::Solaris:
   case llvm::Triple::WASI:
   case llvm::Triple::AIX:
+  case llvm::Triple::Haiku:
     return;
 
   case llvm::Triple::Win32:
